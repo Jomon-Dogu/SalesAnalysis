@@ -1,66 +1,93 @@
-from fastapi import FastAPI, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
+import numpy as np
 import csv
 import io
-import numpy as np  # Für Berechnungen wie Durchschnitt und Standardabweichung
+import logging
+from fastapi.middleware.cors import CORSMiddleware
 
-# Initialisiere FastAPI-Anwendung
+# Logging-Konfiguration
+logging.basicConfig(level=logging.DEBUG)
+
+# FastAPI-Anwendung erstellen
 app = FastAPI()
 
-# CORS-Middleware hinzufügen
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Erlaube die URL des Frontends
+    allow_origins=["http://localhost:3000"],  # Passe hier die Frontend-Domain an
     allow_credentials=True,
-    allow_methods=["*"],  # Erlaube alle HTTP-Methoden
-    allow_headers=["*"],  # Erlaube alle Header
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Datei-Upload-Endpunkt
+
+
 @app.post("/upload_data/")
 async def upload_file(file: UploadFile = File(...)):
     try:
-        # Lies die Datei
+        logging.debug("Datei empfangen: %s", file.filename)
+
+        # Datei lesen
         contents = await file.read()
-        # CSV-Daten auslesen
         csv_file = io.StringIO(contents.decode())
         reader = csv.DictReader(csv_file)
         rows = list(reader)
 
-        # Berechnungen und Anomalien
-        sales = [float(row['sales']) for row in rows]  # Annahme: 'sales' ist der Name der Spalte mit Verkaufswerten
-        avg_sales = np.mean(sales)
-        std_sales = np.std(sales)
+        # Initialisiere Ergebnisse
+        numerical_columns = {}
+        anomalies = []
 
-        # Erkennung von Anomalien
-        anomalies = [
-            {"date": row['date'], "sales": row['sales'], "reason": "Anomalie: Außerhalb 2 Std-Abw."}
-            for row in rows if abs(float(row['sales']) - avg_sales) > 2 * std_sales
-        ]
+        # Durchlaufe alle Spalten
+        for column in reader.fieldnames:
+            try:
+                # Sammle numerische Werte
+                values = [
+                    float(row[column].replace(',', '.'))
+                    for row in rows if row[column].strip()
+                ]
 
-        # Erfolgreiche Antwort zurückgeben
+                # Nur Berechnung durchführen, wenn Werte vorhanden sind
+                if values:
+                    mean = np.mean(values)
+                    std = np.std(values)
+                else:
+                    mean = None
+                    std = None
+
+                numerical_columns[column] = {
+                    "mean": mean,
+                    "std": std
+                }
+
+                # Finde Anomalien
+                column_anomalies = [
+                    {
+                        "row": i,
+                        "value": row[column],
+                        "reason": f"Anomalie: Wert {row[column]} außerhalb von 2 Std-Abw."
+                    }
+                    for i, row in enumerate(rows)
+                    if row[column].strip() and abs(float(row[column].replace(',', '.')) - mean) > 2 * std
+                ] if mean is not None and std is not None else []
+
+                anomalies.extend(column_anomalies)
+
+            except ValueError:
+                logging.warning(f"Spalte '{column}' enthält nicht-konvertierbare Werte.")
+                continue
+
         return JSONResponse(content={
             "status": "Daten hochgeladen",
             "rows": len(rows),
-            "average_sales": avg_sales,
-            "std_sales": std_sales,
-            "anomalies": anomalies,
-            "message": "Die Datei wurde erfolgreich verarbeitet!"
+            "numerical_columns": numerical_columns,
+            "anomalies": anomalies
         }, status_code=200)
 
     except Exception as e:
+        logging.error("Fehler: %s", str(e))
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=422)
 
-# Manuelle OPTIONS-Unterstützung für Preflight-Anfragen
-@app.options("/upload_data/")
-async def options_handler():
-    return JSONResponse(
-        content={},
-        headers={
-            "Access-Control-Allow-Origin": "http://localhost:3000",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
-        },
-        status_code=200,
-    )
+# Starte die Anwendung (Nur für direkten Start, nicht in Produktion verwenden)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)

@@ -1,80 +1,98 @@
-import React, { useState } from 'react';
-import axios from 'axios';
+import React, { useState } from "react";
 
 function App() {
-  const [file, setFile] = useState(null);
   const [response, setResponse] = useState(null);
-
-  // Funktion zum Verarbeiten der Dateiauswahl
-  const handleFileChange = (e) => {
-    setFile(e.target.files[0]);
-    console.log("Selected file:", e.target.files[0]);
-  };
+  const [file, setFile] = useState(null);
 
   // Funktion zum Hochladen der Datei
-  const handleUpload = async () => {
+  const handleFileUpload = async () => {
     if (!file) {
-      alert('Bitte wählen Sie eine Datei aus.');
+      alert("Bitte wählen Sie eine Datei aus, bevor Sie hochladen.");
       return;
     }
 
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append("file", file);
 
     try {
-      const res = await axios.post('http://127.0.0.1:8000/upload_data/', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+      const res = await fetch("http://127.0.0.1:8000/upload_data/", {
+        method: "POST",
+        body: formData,
       });
 
-      // Überprüfe, was genau vom Backend zurückkommt
-      console.log("Backend response:", res.data);
-
-      // Wenn die Antwort eine erfolgreiche Nachricht enthält
-      if (res.data.status === "Daten hochgeladen") {
-        setResponse(res.data); // Erfolgreiche Antwort
-      } else {
-        setResponse({ error: "Unbekannter Fehler beim Hochladen der Datei" });
+      if (!res.ok) {
+        throw new Error(`HTTP-Fehler! Status: ${res.status}`);
       }
+
+      const data = await res.json();
+      console.log("Erhaltene Daten:", data); // Debugging
+      setResponse(data);
     } catch (error) {
-      console.error('Error uploading file:', error);
-      setResponse({ error: 'Error uploading file, please try again.' });
+      console.error("Fehler beim Hochladen der Datei:", error);
+      setResponse({ error: "Fehler beim Hochladen der Datei." });
     }
+  };
+
+  // Funktion für das Setzen der Datei
+  const handleFileChange = (event) => {
+    setFile(event.target.files[0]);
   };
 
   return (
     <div className="App">
-      <h1>CSV-Datei hochladen</h1>
-      
+      <h1>Sales Dashboard</h1>
+
+      {/* Datei-Upload */}
       <input type="file" accept=".csv" onChange={handleFileChange} />
-      <button onClick={handleUpload}>Hochladen</button>
+      <button onClick={handleFileUpload}>Datei hochladen</button>
 
-      {response && (
-        <div>
-          <h2>Ergebnisse</h2>
-          <p><strong>Status:</strong> {response.status}</p>
-          <p><strong>Verarbeitete Zeilen:</strong> {response.rows}</p>
-          <p><strong>Durchschnittliche Verkäufe:</strong> {response.average_sales.toFixed(2)}</p>
-          <p><strong>Standardabweichung:</strong> {response.std_sales.toFixed(2)}</p>
+      {/* Anzeige der Antwort vom Backend */}
+      {response ? (
+        response.error ? (
+          <p>Fehler: {response.error}</p>
+        ) : (
+          <div>
+            <h2>Ergebnisse</h2>
+            <p>Status: {response.status}</p>
+            <p>Verarbeitete Zeilen: {response.rows}</p>
 
-          {response.anomalies && response.anomalies.length > 0 ? (
-            <div>
-              <h3>Anomalien:</h3>
-              <ul>
-                {response.anomalies.map((anomaly, index) => (
-                  <li key={index}>
-                    <strong>Datum:</strong> {anomaly.date}, 
-                    <strong> Verkäufe:</strong> {anomaly.sales}, 
-                    <strong> Grund:</strong> {anomaly.reason}
-                  </li>
+            {/* Anzeige numerischer Spalten */}
+            {response.numerical_columns &&
+            Object.keys(response.numerical_columns).length > 0 ? (
+              <div>
+                <h3>Numerische Spalten</h3>
+                {Object.keys(response.numerical_columns).map((column) => (
+                  <div key={column}>
+                    <h4>{column}</h4>
+                    <p>Durchschnitt: {response.numerical_columns[column].mean}</p>
+                    <p>Standardabweichung: {response.numerical_columns[column].std}</p>
+                  </div>
                 ))}
-              </ul>
-            </div>
-          ) : (
-            <p>Keine Anomalien gefunden.</p>
-          )}
-        </div>
+              </div>
+            ) : (
+              <p>Keine numerischen Spalten gefunden.</p>
+            )}
+
+            {/* Anzeige von Anomalien */}
+            {response.anomalies && response.anomalies.length > 0 ? (
+              <div>
+                <h3>Anomalien</h3>
+                <ul>
+                  {response.anomalies.map((anomaly, index) => (
+                    <li key={index}>
+                      <strong>Zeile:</strong> {anomaly.row}, <strong>Wert:</strong>{" "}
+                      {anomaly.value}, <strong>Grund:</strong> {anomaly.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p>Keine Anomalien gefunden.</p>
+            )}
+          </div>
+        )
+      ) : (
+        <p>Laden...</p>
       )}
     </div>
   );
